@@ -2,12 +2,16 @@
 
 - lpac 2.3.0 disables curl TLS peer and hostname verification. Profile
   download, discovery, and network notification processing are excluded.
-- Some tarball-built lpac packages report `v0.0.0-unknown` because their build
-  cannot derive a Git version. This is a dependency packaging issue; it does
-  not indicate that the eUICC operations failed.
+- lpac 2.3.0 can report `v0.0.0-unknown` because its generated version header
+  collides with an applet header and tarball builds lack Git metadata. Upstream
+  fixed version handling after 2.3.0 in
+  [PR 310](https://github.com/estkme-group/lpac/pull/310). This is a dependency
+  build issue and does not indicate that eUICC operations failed.
 - Notification sequence zero is valid, but lpac currently reports false success
   for explicit process/remove/dump operations on sequence zero. The UI displays
-  it and disables removal.
+  it and disables removal. Upstream fixed this after 2.3.0 in
+  [PR 429](https://github.com/estkme-group/lpac/pull/429), but OpenWrt's packaged
+  2.3.0-r2 does not yet include the fix.
 - The UI only offers profile deletion when the reported state is disabled.
   Direct RPC calls bypass that browser guard and rely on the eUICC policy to
   reject deletion of an enabled profile.

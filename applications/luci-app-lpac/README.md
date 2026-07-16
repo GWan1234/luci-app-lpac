@@ -25,8 +25,10 @@ Separately,
 tracks hardening of untrusted server-response handling.
 
 Notification sequence `0` is valid and is displayed, but its explicit Remove
-action is disabled. The packaged lpac currently reports false success without
-removing that sequence; track
+action is disabled. The packaged lpac 2.3.0 reports false success without
+removing that sequence. Upstream fixed this after 2.3.0 in
+[estkme-group/lpac#429](https://github.com/estkme-group/lpac/pull/429), but the
+fix is not yet present in the OpenWrt package; see also
 [estkme-group/lpac#430](https://github.com/estkme-group/lpac/issues/430).
 
 ## Architecture
