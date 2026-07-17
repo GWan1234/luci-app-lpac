@@ -94,7 +94,7 @@ return view.extend({
 				_('Request an eUICC refresh')
 			]),
 			E('p', { 'class': 'cbi-value-description' }, [
-				_('Leave refresh disabled for the first attempt. Some eUICCs reject profile changes when the refresh flag is set.')
+				_('Requests a logical UICC refresh after the profile change; it does not reboot the modem. Some eUICCs require this flag, while others reject it.')
 			]),
 			E('p', { 'class': 'alert-message warning' }, [
 				_('Changing the active profile can interrupt mobile connectivity. Some modems require a separate SIM power cycle or reconnect afterwards.')

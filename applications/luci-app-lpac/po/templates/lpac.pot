@@ -15,11 +15,11 @@ msgstr ""
 msgid "APDU debug"
 msgstr ""
 
-#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:213
+#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:212
 msgid "AT backend"
 msgstr ""
 
-#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:215
+#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:216
 msgid "AT debug"
 msgstr ""
 
@@ -66,7 +66,7 @@ msgid ""
 msgstr ""
 
 #: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:201
-#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:209
+#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:208
 msgid "Control device"
 msgstr ""
 
@@ -206,13 +206,7 @@ msgstr ""
 msgid "Leave empty to clear the nickname"
 msgstr ""
 
-#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/profiles.js:97
-msgid ""
-"Leave refresh disabled for the first attempt. Some eUICCs reject profile "
-"changes when the refresh flag is set."
-msgstr ""
-
-#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:208
+#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:207
 msgid "MBIM backend"
 msgstr ""
 
@@ -220,13 +214,6 @@ msgstr ""
 msgid ""
 "Manage the eUICC through the official OpenWrt lpac package. Modem and "
 "network lifecycle operations remain outside this application."
-msgstr ""
-
-#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/notifications.js:117
-msgid ""
-"Network notification processing is intentionally unavailable until the "
-"packaged lpac verifies TLS peers. Remove only discards a pending record from "
-"the eUICC; it does not contact the provider or undo the profile operation."
 msgstr ""
 
 #: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/profiles.js:145
@@ -367,6 +354,12 @@ msgstr ""
 msgid "Request an eUICC refresh"
 msgstr ""
 
+#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/profiles.js:97
+msgid ""
+"Requests a logical UICC refresh after the profile change; it does not reboot "
+"the modem. Some eUICCs require this flag, while others reject it."
+msgstr ""
+
 #: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/overview.js:103
 msgid "Root SM-DS address"
 msgstr ""
@@ -376,7 +369,7 @@ msgid "SVN version"
 msgstr ""
 
 #: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/profiles.js:162
-#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:225
+#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:223
 msgid "Save"
 msgstr ""
 
@@ -388,11 +381,18 @@ msgstr ""
 msgid "Selected APDU backend"
 msgstr ""
 
+#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/notifications.js:117
+msgid ""
+"Sending notifications is disabled because the packaged lpac does not "
+"securely verify RSP TLS certificates. Remove only discards the eUICC record; "
+"it does not contact the provider."
+msgstr ""
+
 #: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/notifications.js:77
 msgid "Sequence"
 msgstr ""
 
-#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:214
+#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:213
 msgid "Serial device"
 msgstr ""
 
@@ -408,21 +408,15 @@ msgstr ""
 msgid "State"
 msgstr ""
 
-#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:217
+#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:215
 msgid ""
-"The AT backend is timing-sensitive and may not support all profile "
-"operations on every modem."
+"The AT backend is timing-sensitive and may not support every profile "
+"operation on all modems."
 msgstr ""
 
 #: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:90
 msgid ""
 "The active uqmi backend currently requires a /dev/cdc-wdmN control device."
-msgstr ""
-
-#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:204
-msgid ""
-"The current OpenWrt uqmi backend has known limitations with alternate "
-"control devices. Use the device actually associated with the eUICC."
 msgstr ""
 
 #: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:95
@@ -547,8 +541,14 @@ msgstr ""
 msgid "Updating nickname"
 msgstr ""
 
-#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:210
+#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:209
 msgid "Use mbim-proxy"
+msgstr ""
+
+#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:203
+msgid ""
+"Use the /dev/cdc-wdmN device associated with the eUICC. Alternate control "
+"devices may not work with the current OpenWrt uqmi backend."
 msgstr ""
 
 #: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/notifications.js:51
@@ -624,6 +624,6 @@ msgstr ""
 msgid "uqmi backend"
 msgstr ""
 
-#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:202
+#: applications/luci-app-lpac/htdocs/luci-static/resources/view/lpac/settings.js:204
 msgid "uqmi debug"
 msgstr ""

@@ -154,6 +154,10 @@ const refresh = findAll(modal.content, function(node) {
 assert.ok(refresh, 'refresh checkbox should exist');
 assert.ok(refresh.attrs.checked == null,
 	'refresh should be unchecked for the first attempt');
+assert.strictEqual(findAll(modal.content, function(node) {
+	return node.attrs?.class === 'cbi-value-description' &&
+		textContent(node).startsWith('Requests a logical UICC refresh');
+}).length, 1, 'refresh help should distinguish the eUICC request from a modem reboot');
 
 const identifier = findAll(modal.content, function(node) {
 	return node.attrs?.id === 'lpac-profile-identifier';
@@ -182,6 +186,10 @@ const removeButtons = byText(notificationsPage, 'button', 'Remove');
 assert.strictEqual(removeButtons.length, 1, 'Remove button should exist');
 assert.ok(removeButtons[0].attrs.disabled == null,
 	'Remove button must omit the disabled attribute for a writable nonzero sequence');
+assert.strictEqual(findAll(notificationsPage, function(node) {
+	return node.attrs?.class === 'alert-message warning' &&
+		textContent(node).startsWith('Sending notifications is disabled');
+}).length, 1, 'the page-wide TLS limitation should remain a prominent warning');
 
 const settingsView = loadView('settings.js');
 const settingsPage = settingsView.render([
@@ -223,5 +231,16 @@ assert.strictEqual(selectedBackends.length, 1,
 	'exactly one APDU backend should carry the selected attribute');
 assert.strictEqual(selectedBackends[0].attrs.value, 'mbim',
 	'the configured APDU backend should be selected');
+assert.strictEqual(findAll(settingsPage, function(node) {
+	return node.attrs?.class === 'alert-message warning';
+}).length, 0, 'inactive backend caveats should not render as page-wide warnings');
+assert.strictEqual(findAll(settingsPage, function(node) {
+	return node.attrs?.class === 'cbi-value-description' &&
+		textContent(node).startsWith('Use the /dev/cdc-wdmN device');
+}).length, 1, 'uqmi device guidance should render as field help');
+assert.strictEqual(findAll(settingsPage, function(node) {
+	return node.attrs?.class === 'cbi-value-description' &&
+		textContent(node).startsWith('The AT backend is timing-sensitive');
+}).length, 1, 'AT compatibility guidance should render as field help');
 
-console.log('ok - frontend boolean attributes and profile controls');
+console.log('ok - frontend controls and warning hierarchy');

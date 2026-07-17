@@ -114,7 +114,7 @@ return view.extend({
 				_('Profile operations can create notifications that should normally be sent to the provider.')
 			]),
 			E('div', { 'class': 'alert-message warning' }, [
-				_('Network notification processing is intentionally unavailable until the packaged lpac verifies TLS peers. Remove only discards a pending record from the eUICC; it does not contact the provider or undo the profile operation.')
+				_('Sending notifications is disabled because the packaged lpac does not securely verify RSP TLS certificates. Remove only discards the eUICC record; it does not contact the provider.')
 			]),
 			hasSequenceZero
 				? E('div', { 'class': 'alert-message warning' }, [

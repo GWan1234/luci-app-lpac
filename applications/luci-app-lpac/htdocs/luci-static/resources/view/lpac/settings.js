@@ -198,11 +198,10 @@ return view.extend({
 				: E([]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, [ _('uqmi backend') ]),
-				formRow(_('Control device'), textInput('lpac-uqmi-device', uqmi.device || '/dev/cdc-wdm0', '/dev/cdc-wdm0')),
-				formRow(_('uqmi debug'), checkbox('lpac-uqmi-debug', uqmi.debug === '1')),
-				E('div', { 'class': 'alert-message warning' }, [
-					_('The current OpenWrt uqmi backend has known limitations with alternate control devices. Use the device actually associated with the eUICC.')
-				])
+				formRow(_('Control device'),
+					textInput('lpac-uqmi-device', uqmi.device || '/dev/cdc-wdm0', '/dev/cdc-wdm0'),
+					_('Use the /dev/cdc-wdmN device associated with the eUICC. Alternate control devices may not work with the current OpenWrt uqmi backend.')),
+				formRow(_('uqmi debug'), checkbox('lpac-uqmi-debug', uqmi.debug === '1'))
 			]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, [ _('MBIM backend') ]),
@@ -211,11 +210,10 @@ return view.extend({
 			]),
 			E('div', { 'class': 'cbi-section' }, [
 				E('h3', {}, [ _('AT backend') ]),
-				formRow(_('Serial device'), textInput('lpac-at-device', at.device || '/dev/ttyUSB2', '/dev/ttyUSB2')),
-				formRow(_('AT debug'), checkbox('lpac-at-debug', at.debug === '1')),
-				E('div', { 'class': 'alert-message warning' }, [
-					_('The AT backend is timing-sensitive and may not support all profile operations on every modem.')
-				])
+				formRow(_('Serial device'),
+					textInput('lpac-at-device', at.device || '/dev/ttyUSB2', '/dev/ttyUSB2'),
+					_('The AT backend is timing-sensitive and may not support every profile operation on all modems.')),
+				formRow(_('AT debug'), checkbox('lpac-at-debug', at.debug === '1'))
 			]),
 			E('div', { 'class': 'cbi-page-actions' }, [
 				E('button', {
