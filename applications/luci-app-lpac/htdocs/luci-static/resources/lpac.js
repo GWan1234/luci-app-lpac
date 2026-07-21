@@ -34,6 +34,23 @@ const callListNotifications = rpc.declare({
 	expect: {}
 });
 
+const callDownloadProfile = rpc.declare({
+	object: 'luci.lpac',
+	method: 'download_profile',
+	params: [
+		'mode', 'activation_code', 'smdp', 'matching_id', 'imei',
+		'confirmation_code'
+	],
+	expect: {}
+});
+
+const callGetDownloadStatus = rpc.declare({
+	object: 'luci.lpac',
+	method: 'get_download_status',
+	params: [ 'job_id' ],
+	expect: {}
+});
+
 const callEnableProfile = rpc.declare({
 	object: 'luci.lpac',
 	method: 'enable_profile',
@@ -99,6 +116,8 @@ return baseclass.extend({
 	getInfo: safeCall(callGetInfo),
 	listProfiles: safeCall(callListProfiles),
 	listNotifications: safeCall(callListNotifications),
+	downloadProfile: safeCall(callDownloadProfile),
+	getDownloadStatus: safeCall(callGetDownloadStatus),
 	enableProfile: safeCall(callEnableProfile),
 	disableProfile: safeCall(callDisableProfile),
 	nicknameProfile: safeCall(callNicknameProfile),
@@ -111,6 +130,9 @@ return baseclass.extend({
 		if (!result)
 			return _('No response from the lpac service.');
 
+		if (result.reason === 'outcome_unknown')
+			return _('The profile download outcome is unknown. Refresh Profiles and Notifications before retrying so that the same activation code is not submitted twice.');
+
 		switch (result.error) {
 		case 'busy':
 			return _('Another lpac operation is already running.');
@@ -118,6 +140,8 @@ return baseclass.extend({
 			return _('The request contains an invalid argument.');
 		case 'invalid_config':
 			return _('The lpac configuration is invalid.');
+		case 'job_not_found':
+			return _('The profile download job is no longer available. Refresh Profiles and Notifications before retrying.');
 		case 'not_installed':
 			return _('The lpac executable is not installed.');
 		case 'timeout':
@@ -134,6 +158,8 @@ return baseclass.extend({
 			return _('The lpac RPC request failed or timed out.');
 		case 'lpac_error':
 			switch (result.reason) {
+			case 'download_failed':
+				return _('lpac could not download the profile. Verify the activation details, network connection, and provider service.');
 			case 'profile_not_found':
 				return _('lpac could not find that profile identifier. Try the other identifier if available.');
 			case 'profile_not_disabled':

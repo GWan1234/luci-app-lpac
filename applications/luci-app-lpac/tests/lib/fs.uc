@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
+export function access(path, mode) {
+	push(global.TEST_ACCESS_CALLS, { path, mode });
+
+	return global.TEST_LPAC_ACCESS && global.TEST_ACCESS_FAIL_PATH !== path;
+};
+
 export function lstat(path) {
 	global.TEST_LSTAT_PATH = path;
 
@@ -12,7 +18,7 @@ export function lstat(path) {
 		nlink: global.TEST_LOCK_NLINK,
 		mode: global.TEST_LOCK_MODE
 	};
-}
+};
 
 export function open(path, mode, permissions) {
 	global.TEST_OPEN = { path, mode, permissions };
@@ -33,10 +39,11 @@ export function open(path, mode, permissions) {
 
 		close: function() {
 			global.TEST_LOCK_CLOSED = true;
+			global.TEST_LOCK_CLOSE_COUNT++;
 			return true;
 		}
 	};
-}
+};
 
 export function chmod(path, mode) {
 	global.TEST_CHMOD = { path, mode };
@@ -46,4 +53,4 @@ export function chmod(path, mode) {
 
 	global.TEST_LOCK_MODE = mode;
 	return true;
-}
+};

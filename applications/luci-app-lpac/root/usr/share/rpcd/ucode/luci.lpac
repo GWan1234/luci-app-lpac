@@ -2,7 +2,7 @@
 
 'use strict';
 
-import { chmod, lstat, open } from 'fs';
+import * as fs from 'fs';
 import {
 	connect,
 	STATUS_NOT_FOUND,
@@ -11,12 +11,48 @@ import {
 	STATUS_TIMEOUT
 } from 'ubus';
 import { cursor } from 'uci';
+import { process, timer } from 'uloop';
 
 const LPAC_PATH = '/usr/bin/lpac';
 const FLOCK_PATH = '/usr/bin/flock';
+const SETSID_PATH = '/usr/bin/setsid';
+const KILL_PATH = '/bin/kill';
 const LOCK_PATH = '/var/run/luci-lpac.lock';
 const DEFAULT_AID = 'A0000005591010FFFFFFFF8900000100';
+const DOWNLOAD_TIMEOUT_MS = 600000;
+const DOWNLOAD_JOB_HISTORY = 8;
+/*
+ * uloop.process() shifts away waitpid() signal bits, so a signalled supervisor
+ * appears to exit with zero. Reserve nonzero wrapper statuses for every normal
+ * outcome, leaving raw zero unambiguously unsuccessful.
+ */
+const DOWNLOAD_EXIT_SUCCESS = 64;
+const DOWNLOAD_EXIT_NOT_FOUND = 65;
+const DOWNLOAD_EXIT_NOT_EXECUTABLE = 66;
+const DOWNLOAD_EXIT_FAILED = 67;
+const DOWNLOAD_EXIT_SIGNALED = 68;
+const DOWNLOAD_SCRIPT = '"$@" >/dev/null 2>&1\n' +
+	'code=$?\n' +
+	`[ "$code" -eq 0 ] && exit ${DOWNLOAD_EXIT_SUCCESS}\n` +
+	`[ "$code" -eq 127 ] && exit ${DOWNLOAD_EXIT_NOT_FOUND}\n` +
+	`[ "$code" -eq 126 ] && exit ${DOWNLOAD_EXIT_NOT_EXECUTABLE}\n` +
+	`[ "$code" -ge 128 ] && [ "$code" -lt 255 ] && exit ${DOWNLOAD_EXIT_SIGNALED}\n` +
+	`exit ${DOWNLOAD_EXIT_FAILED}`;
+const DOWNLOAD_ENV = { PATH: '/usr/sbin:/usr/bin:/sbin:/bin' };
+const ACTIVATION_EDGE_MARKS = [
+	'\u00ad', '\u034f', '\u061c', '\u180e', '\u200b', '\u200c', '\u200d',
+	'\u200e', '\u200f', '\u202a', '\u202b', '\u202c', '\u202d', '\u202e',
+	'\u2060', '\u2061', '\u2062', '\u2063', '\u2064', '\u2066', '\u2067',
+	'\u2068', '\u2069', '\ufeff'
+];
 let read_config;
+let download_job = null;
+let download_process = null;
+let download_timer = null;
+let download_timed_out = false;
+let download_job_id = 0;
+let download_jobs = {};
+let download_job_order = [];
 
 /*
  * Keep the connection alive for the lifetime of the rpcd script.  Its nested
@@ -117,6 +153,128 @@ function valid_profile_id(value) {
 function valid_aid(value) {
 	return type(value) == 'string' && length(value) == 32 &&
 		match(value, /^[0-9A-Fa-f]+$/) !== null;
+}
+
+function optional_text(value, max_length) {
+	if (value === null || value === '')
+		return '';
+
+	return safe_text(value, max_length);
+}
+
+function normalize_activation_code(value) {
+	if (type(value) != 'string')
+		return null;
+
+	value = trim(value);
+
+	while (length(value)) {
+		let changed = false;
+
+		for (let mark in ACTIVATION_EDGE_MARKS) {
+			const mark_length = length(mark);
+
+			if (index(value, mark) == 0) {
+				value = trim(substr(value, mark_length));
+				changed = true;
+				break;
+			}
+
+			if (length(value) >= mark_length &&
+			    substr(value, length(value) - mark_length) == mark) {
+				value = trim(substr(value, 0, length(value) - mark_length));
+				changed = true;
+				break;
+			}
+		}
+
+		if (!changed)
+			break;
+	}
+
+	return value;
+}
+
+function has_activation_format_mark(value) {
+	for (let mark in ACTIVATION_EDGE_MARKS)
+		if (index(value, mark) >= 0)
+			return true;
+
+	return false;
+}
+
+function canonicalize_activation_code(value) {
+	const has_scheme = substr(value, 0, 4) == 'LPA:';
+	const fields = split(has_scheme ? substr(value, 4) : value, '$');
+
+	/*
+	 * lpac 2.3.0 mistakes an empty fifth field for a required confirmation
+	 * code. Omitting that empty optional flag preserves the intended meaning.
+	 */
+	if (length(fields) == 5 && fields[4] == '')
+		pop(fields);
+
+	return (has_scheme ? 'LPA:' : '') + join('$', fields);
+}
+
+function valid_smdp(value) {
+	if (type(value) != 'string' || length(value) < 1 || length(value) > 255 ||
+	    match(value, /\.\./) !== null)
+		return false;
+
+	let parsed = match(value, /^[A-Za-z0-9._-]+(:[0-9]{1,5})?$/);
+
+	if (parsed === null)
+		parsed = match(value, /^\[[0-9A-Fa-f:.]+\](:[0-9]{1,5})?$/);
+
+	if (parsed === null)
+		return false;
+
+	if (parsed[1] !== null) {
+		const port = int(substr(parsed[1], 1));
+
+		if (port < 1 || port > 65535)
+			return false;
+	}
+
+	return true;
+}
+
+function valid_matching_id(value) {
+	return type(value) == 'string' && length(value) >= 1 && length(value) <= 255 &&
+		match(value, /^[A-Za-z0-9-]+$/) !== null;
+}
+
+function valid_imei(value) {
+	return type(value) == 'string' &&
+		match(value, /^[0-9]{14,16}$/) !== null;
+}
+
+function valid_activation_code(value, confirmation_code) {
+	if (type(value) != 'string' || length(value) < 5 || length(value) > 4096 ||
+	    match(value, /[[:cntrl:][:space:]]/) !== null ||
+	    has_activation_format_mark(value))
+		return false;
+
+	let code = value;
+
+	if (substr(code, 0, 4) == 'LPA:')
+		code = substr(code, 4);
+
+	const fields = split(code, '$');
+
+	if (length(fields) < 3 || length(fields) > 5 || fields[0] != '1' ||
+	    !valid_smdp(fields[1]) ||
+	    (length(fields[2]) && !valid_matching_id(fields[2])))
+		return false;
+
+	if (length(fields) >= 4 && optional_text(fields[3], 255) === null)
+		return false;
+
+	if (length(fields) == 5 && fields[4] != '' && fields[4] != '0' && fields[4] != '1')
+		return false;
+
+	return length(fields) < 5 || fields[4] != '1' || length(confirmation_code) > 0;
 }
 
 function valid_device_path(value) {
@@ -305,6 +463,8 @@ function operation_error(kind) {
 		return 'Unable to update the profile nickname.';
 	case 'delete':
 		return 'Unable to delete the profile.';
+	case 'download':
+		return 'Unable to download the profile.';
 	case 'remove_notification':
 		return 'Unable to remove the notification.';
 	default:
@@ -465,21 +625,26 @@ function open_lock_file() {
 	let handle;
 
 	try {
-		stat = lstat(LOCK_PATH);
+		stat = fs.lstat(LOCK_PATH);
 
 		/* Never follow or reuse a non-regular or non-root-owned lock path. */
 		if (stat !== null && !valid_lock_file(stat, false))
 			return null;
 
-		handle = open(LOCK_PATH, 'ae', 0o600);
+		/*
+		 * Keep the descriptor inheritable for asynchronous downloads. If a
+		 * wrapper or helper outlives its supervisor, the kernel lock must remain
+		 * held until the complete process tree exits.
+		 */
+		handle = fs.open(LOCK_PATH, 'a', 0o600);
 
 		if (!handle)
 			return null;
 
-		stat = lstat(LOCK_PATH);
+		stat = fs.lstat(LOCK_PATH);
 
-		if (!valid_lock_file(stat, false) || chmod(LOCK_PATH, 0o600) !== true ||
-		    !valid_lock_file(lstat(LOCK_PATH), true)) {
+		if (!valid_lock_file(stat, false) || fs.chmod(LOCK_PATH, 0o600) !== true ||
+		    !valid_lock_file(fs.lstat(LOCK_PATH), true)) {
 			release_lock(handle);
 			return null;
 		}
@@ -511,6 +676,226 @@ function acquire_lock() {
 	}
 
 	return { handle };
+}
+
+function next_download_job_id() {
+	download_job_id++;
+
+	if (download_job_id > 2147483647)
+		download_job_id = 1;
+
+	return download_job_id;
+}
+
+function remember_download_job(job) {
+	download_jobs[job.id] = job;
+	push(download_job_order, job.id);
+
+	while (length(download_job_order) > DOWNLOAD_JOB_HISTORY) {
+		const expired = shift(download_job_order);
+
+		delete download_jobs[expired];
+	}
+}
+
+function clear_download_runtime(id) {
+	if (download_job?.id != id)
+		return;
+
+	if (download_timer) {
+		try {
+			download_timer.cancel();
+		}
+		catch (e) {
+			/* A fired timer may already be detached from the event loop. */
+		}
+	}
+
+	download_process = null;
+	download_timer = null;
+	download_timed_out = false;
+}
+
+function finish_download_job(id, exit_code) {
+	const job = download_jobs[id];
+
+	if (!job || job.status != 'running')
+		return;
+
+	if (download_job?.id == id && download_timed_out) {
+		job.status = 'error';
+		job.error = 'timeout';
+		job.reason = 'outcome_unknown';
+		job.message = 'The lpac download operation timed out.';
+	}
+	else if (type(exit_code) != 'int') {
+		job.status = 'error';
+		job.error = 'execution_failed';
+		job.reason = 'outcome_unknown';
+		job.message = 'The lpac download process returned no exit status.';
+	}
+	else if (exit_code == DOWNLOAD_EXIT_SUCCESS) {
+		job.status = 'success';
+		job.code = 0;
+	}
+	else if (exit_code == DOWNLOAD_EXIT_NOT_FOUND) {
+		job.status = 'error';
+		job.error = 'not_installed';
+		job.message = 'The lpac executable is not installed.';
+	}
+	else if (exit_code == DOWNLOAD_EXIT_NOT_EXECUTABLE) {
+		job.status = 'error';
+		job.error = 'execution_failed';
+		job.message = 'The lpac executable could not be executed.';
+	}
+	else if (exit_code == DOWNLOAD_EXIT_FAILED) {
+		job.status = 'error';
+		job.error = 'lpac_error';
+		job.reason = 'download_failed';
+		job.message = operation_error('download');
+	}
+	else {
+		/*
+		 * uloop discards waitpid() signal bits and reports a signalled process
+		 * as exit code zero. The fixed wrapper never exits with zero, so any
+		 * value outside its protocol is an uncertain supervisor failure.
+		 */
+		job.status = 'error';
+		job.error = 'execution_failed';
+		job.reason = 'outcome_unknown';
+		job.message = (exit_code == DOWNLOAD_EXIT_SIGNALED)
+			? 'The lpac download process ended unexpectedly.'
+			: 'The lpac download supervisor ended unexpectedly.';
+	}
+
+	clear_download_runtime(id);
+}
+
+function stop_download_process(id) {
+	if (!download_job || download_job.id != id || download_job.status != 'running' ||
+	    !download_process)
+		return;
+
+	download_timed_out = true;
+	let pid = null;
+
+	try {
+		pid = download_process.pid();
+	}
+	catch (e) {
+		/* Leave the job running until the process callback can resolve it. */
+	}
+
+	if (type(pid) != 'int' || pid < 2)
+		return;
+
+	try {
+		/* setsid makes the supervisor PID the process-group identifier. */
+		system([ KILL_PATH, '-KILL', `-${pid}` ]);
+	}
+	catch (e) {
+		/* The process callback remains authoritative if signalling fails. */
+	}
+}
+
+function start_download(params) {
+	if (read_config() === null)
+		return failure('invalid_config',
+			'The installed lpac configuration is missing or invalid.');
+
+	if (fs.access(LPAC_PATH, 'x') !== true ||
+	    fs.access(SETSID_PATH, 'x') !== true ||
+	    fs.access(KILL_PATH, 'x') !== true)
+		return failure('not_installed',
+			'The lpac executable or its process supervisor is unavailable.');
+
+	if (download_job?.status == 'running')
+		return failure('busy', 'Another lpac download is already running.');
+
+	const lock_state = acquire_lock();
+
+	if (!lock_state.handle)
+		return lock_state.result;
+
+	const id = next_download_job_id();
+	const lock_handle = lock_state.handle;
+	const argv = [
+		'/bin/sh', '-c', DOWNLOAD_SCRIPT, 'luci-lpac-download', LPAC_PATH
+	];
+
+	for (let param in params)
+		push(argv, param);
+
+	download_job = {
+		id,
+		status: 'running'
+	};
+	remember_download_job(download_job);
+	download_process = null;
+	download_timer = null;
+	download_timed_out = false;
+
+	try {
+		download_timer = timer(DOWNLOAD_TIMEOUT_MS, function() {
+			stop_download_process(id);
+		});
+
+		if (download_timer)
+			download_process = process(SETSID_PATH, argv, DOWNLOAD_ENV,
+				function(exit_code) {
+					finish_download_job(id, exit_code);
+				});
+	}
+	catch (e) {
+		download_process = null;
+	}
+
+	/* The supervised process group inherits this descriptor and its lock. */
+	release_lock(lock_handle);
+
+	if (!download_timer || !download_process) {
+		clear_download_runtime(id);
+		delete download_jobs[id];
+		pop(download_job_order);
+		download_job = null;
+		return failure('execution_failed',
+			'Unable to start the lpac download process.');
+	}
+
+	return success({
+		job_id: id,
+		status: 'running'
+	});
+}
+
+function download_status(id) {
+	if (id == 0) {
+		if (download_job?.status == 'running')
+			return success({
+				job_id: download_job.id,
+				status: 'running'
+			});
+
+		return success({ status: 'idle' });
+	}
+
+	const job = download_jobs[id];
+
+	if (!job)
+		return failure('job_not_found', 'The lpac download job was not found.');
+
+	if (job.status == 'running' || job.status == 'success')
+		return success({
+			job_id: job.id,
+			status: job.status
+		});
+
+	const result = failure(job.error, job.message, job.code);
+
+	if (job.reason)
+		result.reason = job.reason;
+
+	return result;
 }
 
 function run_lpac(request, params, kind, needs_lock) {
@@ -644,7 +1029,9 @@ function normalize_config(config) {
 	    }) ||
 	    !has_exact_keys(config.at, { device: true, debug: true }) ||
 	    !has_exact_keys(config.uqmi, { device: true, debug: true }) ||
-	    !has_exact_keys(config.mbim, { device: true, proxy: true }))
+	    !has_exact_keys(config.mbim, {
+		device: true, proxy: true, skip_slot_mapping: true
+	    }))
 		return null;
 
 	const apdu_backend = config.global.apdu_backend;
@@ -654,12 +1041,14 @@ function normalize_config(config) {
 	const at_debug = normalize_flag(config.at.debug);
 	const uqmi_debug = normalize_flag(config.uqmi.debug);
 	const mbim_proxy = normalize_flag(config.mbim.proxy);
+	const mbim_skip_slot_mapping = normalize_flag(config.mbim.skip_slot_mapping);
 	const aid = config.global.custom_isd_r_aid;
 
 	if (type(apdu_backend) != 'string' ||
 	    index([ 'uqmi', 'mbim', 'at', 'pcsc' ], apdu_backend) < 0 ||
 	    http_backend !== 'curl' || apdu_debug === null || http_debug === null ||
 	    at_debug === null || uqmi_debug === null || mbim_proxy === null ||
+	    mbim_skip_slot_mapping === null ||
 	    !valid_aid(aid) ||
 	    !valid_device_path(config.at.device) ||
 	    !valid_device_path(config.uqmi.device) ||
@@ -685,7 +1074,8 @@ function normalize_config(config) {
 		},
 		mbim: {
 			device: config.mbim.device,
-			proxy: mbim_proxy
+			proxy: mbim_proxy,
+			skip_slot_mapping: mbim_skip_slot_mapping
 		}
 	};
 }
@@ -709,7 +1099,7 @@ read_config = function() {
 
 		config = normalize_config({
 			global: {
-				apdu_backend: uci_value(uci, 'global', 'apdu_backend', 'uqmi'),
+				apdu_backend: uci_value(uci, 'global', 'apdu_backend', 'mbim'),
 				http_backend: uci_value(uci, 'global', 'http_backend', 'curl'),
 				apdu_debug: uci_value(uci, 'global', 'apdu_debug', '0'),
 				http_debug: uci_value(uci, 'global', 'http_debug', '0'),
@@ -726,7 +1116,9 @@ read_config = function() {
 			},
 			mbim: {
 				device: uci_value(uci, 'mbim', 'device', '/dev/cdc-wdm0'),
-				proxy: uci_value(uci, 'mbim', 'proxy', '1')
+				proxy: uci_value(uci, 'mbim', 'proxy', '1'),
+				skip_slot_mapping:
+					uci_value(uci, 'mbim', 'skip_slot_mapping', '1')
 			}
 		});
 	}
@@ -765,6 +1157,8 @@ function write_config(config) {
 			uci.set('lpac', 'mbim', 'mbim') &&
 			uci.set('lpac', 'mbim', 'device', config.mbim.device) &&
 			uci.set('lpac', 'mbim', 'proxy', config.mbim.proxy) &&
+			uci.set('lpac', 'mbim', 'skip_slot_mapping',
+				config.mbim.skip_slot_mapping) &&
 			uci.commit('lpac');
 	}
 	catch (e) {
@@ -811,6 +1205,97 @@ const methods = {
 		call: function(request) {
 			return run_lpac(request, [ 'notification', 'list' ],
 				'notifications', true);
+		}
+	},
+
+	download_profile: {
+		args: {
+			mode: '',
+			activation_code: '',
+			smdp: '',
+			matching_id: '',
+			imei: '',
+			confirmation_code: ''
+		},
+		call: function(request) {
+			const mode = request.args?.mode;
+			let activation_code = request.args?.activation_code;
+			const smdp = optional_text(request.args?.smdp, 255);
+			const matching_id = optional_text(request.args?.matching_id, 255);
+			const imei = optional_text(request.args?.imei, 16);
+			const confirmation_code = optional_text(request.args?.confirmation_code, 255);
+
+			if (mode == 'activation') {
+				activation_code = normalize_activation_code(activation_code);
+
+				if (activation_code !== null)
+					activation_code = optional_text(activation_code, 4096);
+			}
+			else {
+				activation_code = optional_text(activation_code, 4096);
+			}
+
+			if (activation_code === null || smdp === null || matching_id === null ||
+			    imei === null || confirmation_code === null)
+				return failure('invalid_argument',
+					'The profile download parameters are invalid.');
+
+			const params = [ 'profile', 'download' ];
+
+			if (mode == 'activation') {
+				if (lc(substr(activation_code, 0, 4)) == 'lpa:')
+					activation_code = 'LPA:' + substr(activation_code, 4);
+
+				if (!valid_activation_code(activation_code, confirmation_code) ||
+				    length(smdp) || length(matching_id))
+					return failure('invalid_argument',
+						'The LPA activation code is invalid.');
+
+				activation_code = canonicalize_activation_code(activation_code);
+				push(params, '-a', activation_code);
+			}
+			else if (mode == 'manual') {
+				if (length(activation_code) ||
+				    (length(smdp) && !valid_smdp(smdp)) ||
+				    (length(matching_id) && !valid_matching_id(matching_id)))
+					return failure('invalid_argument',
+						'The manual SM-DP+ or matching ID value is invalid.');
+
+				if (length(smdp))
+					push(params, '-s', smdp);
+
+				if (length(matching_id))
+					push(params, '-m', matching_id);
+			}
+			else {
+				return failure('invalid_argument',
+					'The profile download mode is invalid.');
+			}
+
+			if (length(imei)) {
+				if (!valid_imei(imei))
+					return failure('invalid_argument', 'The IMEI is invalid.');
+
+				push(params, '-i', imei);
+			}
+
+			if (length(confirmation_code))
+				push(params, '-c', confirmation_code);
+
+			return start_download(params);
+		}
+	},
+
+	get_download_status: {
+		args: { job_id: 0 },
+		call: function(request) {
+			const id = request.args?.job_id;
+
+			if (type(id) != 'int' || id < 0 || id > 2147483647)
+				return failure('invalid_argument',
+					'The profile download job identifier is invalid.');
+
+			return download_status(id);
 		}
 	},
 
